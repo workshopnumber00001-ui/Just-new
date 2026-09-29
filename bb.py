@@ -5,6 +5,7 @@ import re
 import html
 import tempfile
 import asyncio
+import threading
 import zipfile
 import aiohttp
 from aiohttp import ClientTimeout, ClientError
@@ -15,20 +16,18 @@ from datetime import datetime
 
 # ================= CONFIGURATION =================
 
-BOT_TOKENS = os.getenv("BOT_TOKENS", "8222462858:AAEYb6NSErnRRsXwOf7rDNZfXS-arZQXca0,8749552335:AAF-cu3bvZJjcM2-aGNa-qImS4joNCC-Mfs").split(",")
-if not BOT_TOKENS or BOT_TOKENS == [""]:
+BOT_TOKENS = [t.strip() for t in os.getenv("BOT_TOKENS", "").split(",") if t.strip()]
+if not BOT_TOKENS:
     raise ValueError("Please set BOT_TOKENS environment variable (comma separated)")
 
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1003621974261"))
 API_BASE = os.getenv("API_BASE", "https://backend.multistreaming.site/api")
 
-# ================= KGS CONFIGURATION =================
 KGS_API_BASE = os.getenv("KGS_API_BASE", "https://kgs-main-api-scamer.vercel.app")
 KGS_COURSES_ENDPOINT = os.getenv("KGS_COURSES_ENDPOINT", "/get-courses")
 KGS_SUBJECTS_ENDPOINT = os.getenv("KGS_SUBJECTS_ENDPOINT", "/subjects/{}")
 KGS_LESSONS_ENDPOINT = os.getenv("KGS_LESSONS_ENDPOINT", "/lessons/{}")
 
-# ================= TOPPERS WISDOM CONFIGURATION =================
 TW_API_BASE = os.getenv("TW_API_BASE", "https://node.topperswisdom.com/api")
 TW_COURSES_ENDPOINT = os.getenv("TW_COURSES_ENDPOINT", "/courses")
 TW_TOPICS_ENDPOINT = os.getenv("TW_TOPICS_ENDPOINT", "/topic-and-section?courseId={course_id}")
@@ -51,7 +50,6 @@ EXTRACT_THUMBNAIL = "https://ibb.co/PsmQWNJW"
 
 BANNER_LINE = "━━━━━━━━━━━━━━━━━━━━━━\n⚡ ᴏᴡɴᴇʀ: ⛧Ꮶʀɪsʜɴᴀㅤ⸙\n━━━━━━━━━━━━━━━━━━━━━━\n"
 
-# ================= CW API CONFIGURATION (for content extraction) =================
 CW_API_BASE = os.getenv("CW_API_BASE", "https://yeasty-mufi-scammerbotscw1-ba766b94.koyeb.app")
 CW_DOWNLOAD_PDF = os.getenv("CW_DOWNLOAD_PDF", f"{CW_API_BASE.rstrip('/')}/download-pdf")
 CW_API_KEY = os.getenv("CW_API_KEY", "scammer09876")
@@ -67,7 +65,6 @@ CW_HEADERS = {
     "X-API-Key": CW_API_KEY
 }
 
-# ================= CAREERWILL (web) CONFIGURATION =================
 CAREERWILL_BUILD_ID = os.getenv("CAREERWILL_BUILD_ID", "")
 CAREERWILL_COOKIE = os.getenv("CAREERWILL_COOKIE", "")
 
@@ -81,7 +78,6 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # ================= LOGGING HELPER =================
 async def send_log(bot, text, parse_mode=ParseMode.HTML):
-    """Send log message to the configured Telegram channel."""
     try:
         await bot.send_message(chat_id=LOG_CHANNEL_ID, text=text, parse_mode=parse_mode)
     except Exception as e:
@@ -132,7 +128,6 @@ def extract_links_from_item(item):
             links.extend(extract_links_from_item(elem))
     return links
 
-# ========== CW API helpers ==========
 async def decrypt_video_token_async(session, raw_token_str):
     if not raw_token_str or str(raw_token_str).startswith('http'):
         return raw_token_str, ""
@@ -233,7 +228,6 @@ async def fetch_cw_batch_topics(batch_id):
             return None
         return topics, batch_details.get('batchName') or batch_details.get('name') or f"Batch_{batch_id}"
 
-# ========== Careerwill Helpers ==========
 async def get_careerwill_build_id():
     try:
         async with aiohttp.ClientSession() as session:
@@ -301,7 +295,6 @@ async def dedup_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_any_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pass
 
-# ========== SPLIT HANDLERS ==========
 async def handle_split_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, doc):
     user = update.effective_user
     msg = await update.message.reply_text("⏳ Analyzing file and extracting subjects... 🤖⚡")
@@ -310,6 +303,7 @@ async def handle_split_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, d
     base_name = os.path.splitext(original_filename)[0]
     sanitized_base = sanitize_filename(base_name)
     
+    tmp_in_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp_in:
             bot_file = await context.bot.get_file(doc.file_id)
@@ -374,7 +368,6 @@ async def handle_split_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, d
 
         groups_list = list(groups_dict.values())
         total_subjects = len(groups_list)
-        total_lines = sum(len(g['lines']) for g in groups_list)
 
         context.user_data['split_data'] = {
             'groups': groups_list,
@@ -390,7 +383,7 @@ async def handle_split_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, d
         await send_log(context.bot, f"❌ Split error: {str(e)} by {user.id}")
         await update.message.reply_text(f"❌ Error: {str(e)} 😵‍💫")
     finally:
-        if os.path.exists(tmp_in_path):
+        if tmp_in_path and os.path.exists(tmp_in_path):
             os.remove(tmp_in_path)
 
 async def display_split_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, status_msg=None, page=0):
@@ -403,7 +396,6 @@ async def display_split_menu(update: Update, context: ContextTypes.DEFAULT_TYPE,
     original_filename = data['original_filename']
     total_subjects = len(groups)
     total_lines = sum(len(g['lines']) for g in groups)
-    selected_count = sum(selected)
 
     ITEMS_PER_PAGE = 8
     total_pages = (total_subjects + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
@@ -539,24 +531,22 @@ async def split_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text("✅ Done! Files sent above. 🚀")
         await send_log(context.bot, f"✅ Split completed by {query.from_user.first_name} - {len(selected_indices)} files generated")
 
-# ========== DEDUP HANDLER ==========
 async def handle_dedup_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, doc):
     user = update.effective_user
     msg = await update.message.reply_text("⏳ Removing duplicate links... 🔍🧹")
+    tmp_in_path = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as tmp_in:
             bot_file = await context.bot.get_file(doc.file_id)
             await bot_file.download_to_drive(tmp_in.name)
             tmp_in_path = tmp_in.name
 
-        lines = []
         with open(tmp_in_path, 'r', encoding='utf-8-sig') as f:
             lines = f.read().splitlines()
 
         seen_urls = set()
         unique_lines = []
         total_lines = len(lines)
-        duplicate_count = 0
 
         for line in lines:
             if not line.strip():
@@ -567,8 +557,6 @@ async def handle_dedup_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, d
                 if url not in seen_urls:
                     seen_urls.add(url)
                     unique_lines.append(line)
-                else:
-                    duplicate_count += 1
             else:
                 unique_lines.append(line)
 
@@ -604,10 +592,9 @@ async def handle_dedup_txt(update: Update, context: ContextTypes.DEFAULT_TYPE, d
         await send_log(context.bot, f"❌ Dedup error: {str(e)} by {user.id}")
         await update.message.reply_text(f"❌ Error: {str(e)} 😵‍💫")
     finally:
-        if os.path.exists(tmp_in_path):
+        if tmp_in_path and os.path.exists(tmp_in_path):
             os.remove(tmp_in_path)
 
-# ========== ORIGINAL EXTRACT COMMAND ==========
 async def extract(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_authorized(user.id):
@@ -683,9 +670,7 @@ async def show_extract_page(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         await update.message.reply_text(header, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# ========== CW COMMAND ==========
 async def cw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Extract Careerwill batches using web scraping (same as /careerwill)"""
     await careerwill(update, context)
 
 async def careerwill(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -700,10 +685,9 @@ async def careerwill(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         build_id = await get_careerwill_build_id()
         if not build_id:
-            build_id = "WuAwSZiJu-Vol1R998vWW"  # default fallback
+            build_id = "WuAwSZiJu-Vol1R998vWW"
         CAREERWILL_BASE = f"https://web.careerwill.com/_next/data/{build_id}"
         CAREERWILL_BATCHES = f"{CAREERWILL_BASE}/live-classes.json?view=List&interface_id=1"
-        CAREERWILL_BATCH_DETAIL = f"{CAREERWILL_BASE}/live-classes/{{}}.json?interface_id=1"
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -723,8 +707,7 @@ async def careerwill(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await send_log(context.bot, f"❌ /cw fetch failed for {user.id}")
                     await msg.edit_text(
                         "❌ Failed to fetch batches.\n"
-                        "Please set CAREERWILL_COOKIE environment variable.\n"
-                        "To get cookie: open Careerwill website, copy cookie from browser DevTools."
+                        "Please set CAREERWILL_COOKIE environment variable."
                     )
                     return
 
@@ -734,7 +717,6 @@ async def careerwill(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("⚠️ No batches found. Check your cookie or try later.")
             return
 
-        # Send batch list as TXT file
         txt_content = f"{BANNER_LINE}\n         CAREERWILL BATCHES LIST\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
         for batch in live_classes:
             b_id = batch.get('id')
@@ -759,7 +741,6 @@ async def careerwill(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_log(context.bot, f"❌ /cw error: {str(e)} by {user.id}")
         await msg.edit_text(f"❌ Error: {str(e)} 😵‍💫")
 
-# Handle batch ID input after /cw or /careerwill
 async def handle_cw_batch_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_authorized(user.id):
@@ -776,12 +757,10 @@ async def handle_cw_batch_id(update: Update, context: ContextTypes.DEFAULT_TYPE)
     processing_msg = await update.message.reply_text(f"⏳ Extracting content from <b>{batch_name}</b>... 🎬", parse_mode=ParseMode.HTML)
 
     try:
-        # Try to fetch from CW API first (for videos + PDFs)
         topics_result = await fetch_cw_batch_topics(batch_id)
         if topics_result:
             topics, batch_name_api = topics_result
             if topics:
-                # Use API extraction
                 async with aiohttp.ClientSession(headers=CW_HEADERS) as session:
                     txt_content = f"{BANNER_LINE}\n👤 Extracted By: {user.first_name}\n📛 BATCH: {batch_name_api.upper()}\n🆔 ID: {batch_id}\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
                     total_videos, total_pdfs = 0, 0
@@ -794,7 +773,6 @@ async def handle_cw_batch_id(update: Update, context: ContextTypes.DEFAULT_TYPE)
                         await processing_msg.edit_text("⚠️ No content found via API. Trying web fallback...")
                         await extract_cw_web(update, context, batch_id, batch_name, processing_msg)
                         return
-                    # Send file
                     filename = f"CW_{sanitize_filename(batch_name_api)}.txt"
                     file_buffer = io.BytesIO(txt_content.encode('utf-8'))
                     caption = (
@@ -813,7 +791,6 @@ async def handle_cw_batch_id(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     await send_log(context.bot, f"✅ CW extraction complete (API) for batch {batch_name_api} by {user.first_name} - Videos: {total_videos}, PDFs: {total_pdfs}")
                     return
 
-        # If API fails, fallback to web scraping (videos only)
         await extract_cw_web(update, context, batch_id, batch_name, processing_msg)
 
     except Exception as e:
@@ -824,7 +801,6 @@ async def handle_cw_batch_id(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data.pop('waiting_for_cw_batch', None)
 
 async def extract_cw_web(update: Update, context: ContextTypes.DEFAULT_TYPE, batch_id, batch_name, processing_msg):
-    """Fallback: extract videos using Careerwill web scraping (no PDFs)"""
     try:
         build_id = await get_careerwill_build_id()
         if not build_id:
@@ -892,7 +868,6 @@ async def extract_cw_web(update: Update, context: ContextTypes.DEFAULT_TYPE, bat
         await send_log(context.bot, f"❌ CW web fallback error: {str(e)} by {update.effective_user.id}")
         await processing_msg.edit_text(f"❌ Error: {str(e)} 😵‍💫")
 
-# ========== KGS COMMAND ==========
 async def kgs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_authorized(user.id):
@@ -908,11 +883,7 @@ async def kgs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = await fetch_with_retry(session, url)
         if data is None:
             await send_log(context.bot, f"❌ /kgs API error for {user.id}")
-            await msg.edit_text(
-                f"❌ Failed to fetch courses from KGS.\n"
-                f"URL: <code>{url}</code>",
-                parse_mode=ParseMode.HTML
-            )
+            await msg.edit_text(f"❌ Failed to fetch courses from KGS.\nURL: <code>{url}</code>", parse_mode=ParseMode.HTML)
             return
 
     courses = None
@@ -932,10 +903,7 @@ async def kgs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not courses:
         await send_log(context.bot, f"⚠️ /kgs no courses for {user.id}")
-        await msg.edit_text(
-            f"⚠️ No courses found.\nRaw response (first 300 chars):\n<code>{str(data)[:300]}</code>",
-            parse_mode=ParseMode.HTML
-        )
+        await msg.edit_text(f"⚠️ No courses found.\nRaw: <code>{str(data)[:300]}</code>", parse_mode=ParseMode.HTML)
         return
 
     course_map = {}
@@ -948,10 +916,7 @@ async def kgs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not course_map:
         await send_log(context.bot, f"⚠️ /kgs no valid course IDs for {user.id}")
-        await msg.edit_text(
-            f"⚠️ No valid course IDs found.",
-            parse_mode=ParseMode.HTML
-        )
+        await msg.edit_text(f"⚠️ No valid course IDs found.", parse_mode=ParseMode.HTML)
         return
 
     context.user_data['kgs_courses'] = courses
@@ -1005,10 +970,7 @@ async def handle_kgs_course(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     subjects_endpoint = context.user_data.get('kgs_subjects_endpoint', KGS_SUBJECTS_ENDPOINT)
     lessons_endpoint = context.user_data.get('kgs_lessons_endpoint', KGS_LESSONS_ENDPOINT)
 
-    processing_msg = await query.edit_message_text(
-        f"⏳ Extracting content from <b>{course_name}</b>... ⚡",
-        parse_mode=ParseMode.HTML
-    )
+    processing_msg = await query.edit_message_text(f"⏳ Extracting content from <b>{course_name}</b>... ⚡", parse_mode=ParseMode.HTML)
 
     try:
         async with aiohttp.ClientSession(headers=HEADERS) as session:
@@ -1016,10 +978,7 @@ async def handle_kgs_course(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             subjects_data = await fetch_with_retry(session, subjects_url)
             if subjects_data is None:
                 await send_log(context.bot, f"❌ KGS subjects fetch failed for {course_name} by {user.id}")
-                await processing_msg.edit_text(
-                    f"❌ Failed to fetch subjects for course {course_name}.\nURL: <code>{subjects_url}</code>",
-                    parse_mode=ParseMode.HTML
-                )
+                await processing_msg.edit_text(f"❌ Failed to fetch subjects.\nURL: <code>{subjects_url}</code>", parse_mode=ParseMode.HTML)
                 return
 
             subjects = None
@@ -1039,10 +998,7 @@ async def handle_kgs_course(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
             if not subjects:
                 await send_log(context.bot, f"⚠️ KGS no subjects for {course_name} by {user.id}")
-                await processing_msg.edit_text(
-                    f"⚠️ No subjects found for this course.\nRaw response (first 300 chars):\n<code>{str(subjects_data)[:300]}</code>",
-                    parse_mode=ParseMode.HTML
-                )
+                await processing_msg.edit_text(f"⚠️ No subjects found.\nRaw: <code>{str(subjects_data)[:300]}</code>", parse_mode=ParseMode.HTML)
                 return
 
             output = [
@@ -1092,11 +1048,7 @@ async def handle_kgs_course(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
             if total_videos == 0 and total_pdfs == 0:
                 await send_log(context.bot, f"⚠️ KGS no links for {course_name} by {user.id}")
-                await processing_msg.edit_text(
-                    "⚠️ No valid links found in the course content.\n"
-                    "The API response structure might be different. Please contact the bot owner.",
-                    parse_mode=ParseMode.HTML
-                )
+                await processing_msg.edit_text("⚠️ No valid links found in the course content.", parse_mode=ParseMode.HTML)
                 return
 
             filename = f"KGS_{sanitize_filename(course_name)}.txt"
@@ -1114,12 +1066,7 @@ async def handle_kgs_course(update: Update, context: ContextTypes.DEFAULT_TYPE, 
                 f"👤 <b>By:</b> {user.first_name}"
             )
 
-            await query.message.reply_document(
-                document=file_buffer,
-                filename=filename,
-                caption=caption,
-                parse_mode=ParseMode.HTML
-            )
+            await query.message.reply_document(document=file_buffer, filename=filename, caption=caption, parse_mode=ParseMode.HTML)
             await processing_msg.delete()
             await send_log(context.bot, f"✅ KGS extraction complete for {course_name} by {user.first_name} - Videos: {total_videos}, PDFs: {total_pdfs}")
 
@@ -1128,7 +1075,6 @@ async def handle_kgs_course(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         await send_log(context.bot, f"❌ KGS error: {str(e)} by {user.id}")
         await processing_msg.edit_text(f"❌ Error: {str(e)} 😵‍💫")
 
-# ================= TOPPERS WISDOM =================
 async def tw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_authorized(user.id):
@@ -1144,11 +1090,7 @@ async def tw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = await fetch_with_retry(session, url)
         if data is None:
             await send_log(context.bot, f"❌ /tw API error for {user.id}")
-            await msg.edit_text(
-                f"❌ Failed to fetch courses from Toppers Wisdom.\n"
-                f"URL: <code>{url}</code>",
-                parse_mode=ParseMode.HTML
-            )
+            await msg.edit_text(f"❌ Failed to fetch courses.\nURL: <code>{url}</code>", parse_mode=ParseMode.HTML)
             return
 
     courses = None
@@ -1168,10 +1110,7 @@ async def tw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not courses:
         await send_log(context.bot, f"⚠️ /tw no courses for {user.id}")
-        await msg.edit_text(
-            f"⚠️ No courses found.\nRaw response (first 300 chars):\n<code>{str(data)[:300]}</code>",
-            parse_mode=ParseMode.HTML
-        )
+        await msg.edit_text(f"⚠️ No courses found.\nRaw: <code>{str(data)[:300]}</code>", parse_mode=ParseMode.HTML)
         return
 
     course_map = {}
@@ -1184,10 +1123,7 @@ async def tw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not course_map:
         await send_log(context.bot, f"⚠️ /tw no valid course IDs for {user.id}")
-        await msg.edit_text(
-            f"⚠️ No valid course IDs found.",
-            parse_mode=ParseMode.HTML
-        )
+        await msg.edit_text(f"⚠️ No valid course IDs found.", parse_mode=ParseMode.HTML)
         return
 
     context.user_data['tw_courses'] = courses
@@ -1207,10 +1143,7 @@ async def handle_tw_course(update: Update, context: ContextTypes.DEFAULT_TYPE, c
     await query.answer()
 
     course_name = context.user_data.get('tw_course_map', {}).get(course_id, "Course")
-    processing_msg = await query.edit_message_text(
-        f"⏳ Extracting content from <b>{course_name}</b>... ⚡",
-        parse_mode=ParseMode.HTML
-    )
+    processing_msg = await query.edit_message_text(f"⏳ Extracting content from <b>{course_name}</b>... ⚡", parse_mode=ParseMode.HTML)
 
     try:
         async with aiohttp.ClientSession(headers=HEADERS) as session:
@@ -1218,10 +1151,7 @@ async def handle_tw_course(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             topics_data = await fetch_with_retry(session, topics_url)
             if topics_data is None:
                 await send_log(context.bot, f"❌ TW topics fetch failed for {course_name} by {user.id}")
-                await processing_msg.edit_text(
-                    f"❌ Failed to fetch topics for course {course_name}.\nURL: <code>{topics_url}</code>",
-                    parse_mode=ParseMode.HTML
-                )
+                await processing_msg.edit_text(f"❌ Failed to fetch topics.\nURL: <code>{topics_url}</code>", parse_mode=ParseMode.HTML)
                 return
 
             topics = None
@@ -1243,10 +1173,7 @@ async def handle_tw_course(update: Update, context: ContextTypes.DEFAULT_TYPE, c
 
             if not topics:
                 await send_log(context.bot, f"⚠️ TW no topics for {course_name} by {user.id}")
-                await processing_msg.edit_text(
-                    f"⚠️ No topics/sections found.\nRaw response (first 300 chars):\n<code>{str(topics_data)[:300]}</code>",
-                    parse_mode=ParseMode.HTML
-                )
+                await processing_msg.edit_text(f"⚠️ No topics found.\nRaw: <code>{str(topics_data)[:300]}</code>", parse_mode=ParseMode.HTML)
                 return
 
             output = [
@@ -1302,11 +1229,7 @@ async def handle_tw_course(update: Update, context: ContextTypes.DEFAULT_TYPE, c
 
             if total_videos == 0 and total_pdfs == 0:
                 await send_log(context.bot, f"⚠️ TW no links for {course_name} by {user.id}")
-                await processing_msg.edit_text(
-                    "⚠️ No valid links found in the course content.\n"
-                    "The API response structure might be different. Please contact the bot owner.",
-                    parse_mode=ParseMode.HTML
-                )
+                await processing_msg.edit_text("⚠️ No valid links found in the course content.", parse_mode=ParseMode.HTML)
                 return
 
             filename = f"ToppersWisdom_{sanitize_filename(course_name)}.txt"
@@ -1324,12 +1247,7 @@ async def handle_tw_course(update: Update, context: ContextTypes.DEFAULT_TYPE, c
                 f"👤 <b>By:</b> {user.first_name}"
             )
 
-            await query.message.reply_document(
-                document=file_buffer,
-                filename=filename,
-                caption=caption,
-                parse_mode=ParseMode.HTML
-            )
+            await query.message.reply_document(document=file_buffer, filename=filename, caption=caption, parse_mode=ParseMode.HTML)
             await processing_msg.delete()
             await send_log(context.bot, f"✅ TW extraction complete for {course_name} by {user.first_name} - Videos: {total_videos}, PDFs: {total_pdfs}")
 
@@ -1338,7 +1256,6 @@ async def handle_tw_course(update: Update, context: ContextTypes.DEFAULT_TYPE, c
         await send_log(context.bot, f"❌ TW error: {str(e)} by {user.id}")
         await processing_msg.edit_text(f"❌ Error: {str(e)} 😵‍💫")
 
-# ================= CALLBACK HANDLER =================
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.from_user
@@ -1418,7 +1335,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         v_count = context.user_data.get('curr_v_count', 0)
         p_count = context.user_data.get('curr_p_count', 0)
         processing_msg = await query.edit_message_text(
-            f"⏳ <b>Extracting content from</b> <code>{b_name}</code>...\nPlease wait, this may take a moment. ⚡",
+            f"⏳ <b>Extracting content from</b> <code>{b_name}</code>...\nPlease wait. ⚡",
             parse_mode=ParseMode.HTML
         )
         output = [
@@ -1452,7 +1369,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 <b>By:</b> {user.first_name}"
         )
-        final_doc = await query.message.reply_document(document=file_buffer, filename=filename, caption=caption, parse_mode=ParseMode.HTML)
+        await query.message.reply_document(document=file_buffer, filename=filename, caption=caption, parse_mode=ParseMode.HTML)
         await processing_msg.delete()
         await send_log(context.bot, f"✅ Batch extraction complete for {b_name} by {user.first_name} - Videos: {v_count}, PDFs: {p_count}")
 
@@ -1467,7 +1384,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cancel_extract":
         await query.edit_message_text("❌ Action cancelled. 🙅‍♂️")
 
-# ================= MULTI-BOT RUNNER =================
+# ================= FILE HANDLER =================
+async def handle_split_or_dedup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('split_mode', False):
+        await handle_split_txt(update, context, update.message.document)
+    elif context.user_data.get('dedup_mode', False):
+        await handle_dedup_txt(update, context, update.message.document)
+    else:
+        await update.message.reply_text("Please use /split or /dedup command first, then send the TXT file.")
+
+# ================= BOT RUNNER =================
 
 def run_single_bot(token):
     try:
@@ -1486,25 +1412,51 @@ def run_single_bot(token):
         app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_any_text))
         app.add_handler(CallbackQueryHandler(handle_callback))
         logging.info(f"✅ Bot started: {token[:10]}... 🚀")
-        app.run_polling()
+        app.run_polling(drop_pending_updates=True)
     except Exception as e:
         logging.exception(f"Bot failure with token {token[:10]}")
 
-# Helper to decide between split and dedup
-async def handle_split_or_dedup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get('split_mode', False):
-        await handle_split_txt(update, context, update.message.document)
-    elif context.user_data.get('dedup_mode', False):
-        await handle_dedup_txt(update, context, update.message.document)
-    else:
-        await update.message.reply_text("Please use /split or /dedup command first, then send the TXT file.")
+
+# ================= HEALTH SERVER (for Render Web Service) =================
+async def health_server():
+    try:
+        from aiohttp import web
+        async def health(request):
+            return web.Response(text="Bot is running ✅")
+        web_app = web.Application()
+        web_app.router.add_get("/", health)
+        web_app.router.add_get("/health", health)
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        port = int(os.getenv("PORT", 8080))
+        site = web.TCPSite(runner, "0.0.0.0", port)
+        await site.start()
+        logging.info(f"🌐 Health server started on port {port}")
+        await asyncio.Event().wait()
+    except Exception as e:
+        logging.error(f"Health server error: {e}")
+
+
+def _run_health_thread():
+    try:
+        asyncio.run(health_server())
+    except Exception as e:
+        logging.error(f"Health thread died: {e}")
+
 
 if __name__ == '__main__':
-    import multiprocessing
-    processes = []
+    # Start health server (needed for Render Web Service free tier)
+    if os.getenv("PORT"):
+        threading.Thread(target=_run_health_thread, daemon=True).start()
+
+    # Start each bot in its own thread
+    threads = []
     for bot_token in BOT_TOKENS:
-        p = multiprocessing.Process(target=run_single_bot, args=(bot_token.strip(),))
-        p.start()
-        processes.append(p)
-    for p in processes:
-        p.join()
+        t = threading.Thread(target=run_single_bot, args=(bot_token.strip(),), daemon=True)
+        t.start()
+        threads.append(t)
+        logging.info(f"🧵 Started thread for bot: {bot_token[:10]}...")
+
+    # Keep main thread alive
+    for t in threads:
+        t.join()
