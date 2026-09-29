@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: telegram-multi-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bb.py
+    envVars:
+      - key: BOT_TOKENS
+        sync: false
+      - key: LOG_CHANNEL_ID
+        value: "-1003621974261"
+      - key: AUTHORIZED_USERS
+        value: "5349573682,8453406690,1193248592"
+      - key: CW_API_KEY
+        value: "scammer09876"
+      - key: CAREERWILL_COOKIE
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.9"
