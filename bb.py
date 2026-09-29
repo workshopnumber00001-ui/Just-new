@@ -14,49 +14,39 @@ from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from datetime import datetime
 
-# ================= CONFIGURATION =================
+# ================= CONFIGURATION (HARDCODED - RAILWAY DIRECT DEPLOY) =================
 
-BOT_TOKENS = [t.strip() for t in os.getenv("BOT_TOKENS", "").split(",") if t.strip()]
-if not BOT_TOKENS:
-    raise ValueError("Please set BOT_TOKENS environment variable (comma separated)")
+BOT_TOKENS = ["8222462858:AAEYb6NSErnRRsXwOf7rDNZfXS-arZQXca0", "8749552335:AAF-cu3bvZJjcM2-aGNa-qImS4joNCC-Mfs"]
 
-LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", "-1003621974261"))
-API_BASE = os.getenv("API_BASE", "https://backend.multistreaming.site/api")
+LOG_CHANNEL_ID = -1003621974261
+API_BASE = "https://backend.multistreaming.site/api"
 
-KGS_API_BASE = os.getenv("KGS_API_BASE", "https://kgs-main-api-scamer.vercel.app")
-KGS_COURSES_ENDPOINT = os.getenv("KGS_COURSES_ENDPOINT", "/get-courses")
-KGS_SUBJECTS_ENDPOINT = os.getenv("KGS_SUBJECTS_ENDPOINT", "/subjects/{}")
-KGS_LESSONS_ENDPOINT = os.getenv("KGS_LESSONS_ENDPOINT", "/lessons/{}")
+KGS_API_BASE = "https://kgs-main-api-scamer.vercel.app"
+KGS_COURSES_ENDPOINT = "/get-courses"
+KGS_SUBJECTS_ENDPOINT = "/subjects/{}"
+KGS_LESSONS_ENDPOINT = "/lessons/{}"
 
-TW_API_BASE = os.getenv("TW_API_BASE", "https://node.topperswisdom.com/api")
-TW_COURSES_ENDPOINT = os.getenv("TW_COURSES_ENDPOINT", "/courses")
-TW_TOPICS_ENDPOINT = os.getenv("TW_TOPICS_ENDPOINT", "/topic-and-section?courseId={course_id}")
-TW_CLASSES_ENDPOINT = os.getenv("TW_CLASSES_ENDPOINT", "/topics/{topic_id}/classes?courseId={course_id}")
+TW_API_BASE = "https://node.topperswisdom.com/api"
+TW_COURSES_ENDPOINT = "/courses"
+TW_TOPICS_ENDPOINT = "/topic-and-section?courseId={course_id}"
+TW_CLASSES_ENDPOINT = "/topics/{topic_id}/classes?courseId={course_id}"
 
-try:
-    auth_users_str = os.getenv("AUTHORIZED_USERS", "5349573682,8453406690,1193248592")
-    AUTHORIZED_USERS = [int(uid.strip()) for uid in auth_users_str.split(",") if uid.strip()]
-    if not AUTHORIZED_USERS:
-        AUTHORIZED_USERS = [5349573682, 8453406690]
-        logging.warning("No authorized users found, using fallback IDs")
-except ValueError as e:
-    AUTHORIZED_USERS = [5349573682, 8453406690]
-    logging.warning(f"Invalid AUTHORIZED_USERS format: {e}, using fallback IDs")
+AUTHORIZED_USERS = [5349573682, 8453406690, 1193248592]
 
-STYLISH_NAME = os.getenv("STYLISH_NAME", "❣️")
+STYLISH_NAME = "❣️"
 
 START_THUMBNAIL = "https://ibb.co/PsmQWNJW"
 EXTRACT_THUMBNAIL = "https://ibb.co/PsmQWNJW"
 
 BANNER_LINE = "━━━━━━━━━━━━━━━━━━━━━━\n⚡ ᴏᴡɴᴇʀ: ⛧Ꮶʀɪsʜɴᴀㅤ⸙\n━━━━━━━━━━━━━━━━━━━━━━\n"
 
-CW_API_BASE = os.getenv("CW_API_BASE", "https://yeasty-mufi-scammerbotscw1-ba766b94.koyeb.app")
-CW_DOWNLOAD_PDF = os.getenv("CW_DOWNLOAD_PDF", f"{CW_API_BASE.rstrip('/')}/download-pdf")
-CW_API_KEY = os.getenv("CW_API_KEY", "scammer09876")
+CW_API_BASE = "https://yeasty-mufi-scammerbotscw1-ba766b94.koyeb.app"
+CW_DOWNLOAD_PDF = f"{CW_API_BASE.rstrip('/')}/download-pdf"
+CW_API_KEY = "scammer09876"
 
-CW_BATCH_API = os.getenv("CW_BATCH_API", f"{CW_API_BASE.rstrip('/')}/batch/{{}}")
-CW_TOPIC_API = os.getenv("CW_TOPIC_API", f"{CW_API_BASE.rstrip('/')}/batch?batchid={{}}&topicid={{}}")
-CW_VIDEO_API = os.getenv("CW_VIDEO_API", f"{CW_API_BASE.rstrip('/')}/get_video_details?name={{}}")
+CW_BATCH_API = f"{CW_API_BASE.rstrip('/')}/batch/{{}}"
+CW_TOPIC_API = f"{CW_API_BASE.rstrip('/')}/batch?batchid={{}}&topicid={{}}"
+CW_VIDEO_API = f"{CW_API_BASE.rstrip('/')}/get_video_details?name={{}}"
 
 CW_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -65,8 +55,8 @@ CW_HEADERS = {
     "X-API-Key": CW_API_KEY
 }
 
-CAREERWILL_BUILD_ID = os.getenv("CAREERWILL_BUILD_ID", "")
-CAREERWILL_COOKIE = os.getenv("CAREERWILL_COOKIE", "")
+CAREERWILL_BUILD_ID = ""
+CAREERWILL_COOKIE = ""
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -1417,7 +1407,7 @@ def run_single_bot(token):
         logging.exception(f"Bot failure with token {token[:10]}")
 
 
-# ================= HEALTH SERVER (for Render Web Service) =================
+# ================= HEALTH SERVER (for Render / Railway) =================
 async def health_server():
     try:
         from aiohttp import web
